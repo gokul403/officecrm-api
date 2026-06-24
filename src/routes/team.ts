@@ -1,7 +1,10 @@
 import { Router, Response } from "express";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/auth.js";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const router = Router();
 
@@ -80,6 +83,95 @@ router.post("/team/active", requireAuth, requireRole(["admin"]), async (req: Aut
   } catch (error) {
     console.error("Toggle active error:", error);
     return res.status(500).json({ message: "Error updating user status" });
+  }
+});
+
+// POST /api/team/members - Create a manager or employee (admin only)
+router.post("/team/members", requireAuth, requireRole(["admin"]), async (req: AuthenticatedRequest, res: Response) => {
+  const { email: rawEmail, fullName, jobTitle, role, managerId } = req.body;
+
+  if (!rawEmail || !fullName || !role) {
+    return res.status(400).json({ message: "email, fullName, and role are required" });
+  }
+
+  const email = String(rawEmail).trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) {
+    return res.status(400).json({ message: "Invalid email address" });
+  }
+
+  if (role !== "manager" && role !== "employee") {
+    return res.status(400).json({ message: "role must be manager or employee" });
+  }
+
+  if (role === "employee" && !managerId) {
+    return res.status(400).json({ message: "managerId is required for employees" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existing = await client.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (existing.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "A user with this email already exists" });
+    }
+
+    let resolvedManagerId: string | null = null;
+    if (role === "employee") {
+      const managerCheck = await client.query(
+        `SELECT p.id FROM profiles p
+         INNER JOIN user_roles ur ON ur.user_id = p.id
+         WHERE p.id = $1 AND ur.role = 'manager' AND p.is_active = TRUE`,
+        [managerId]
+      );
+      if (managerCheck.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Invalid or inactive manager" });
+      }
+      resolvedManagerId = managerCheck.rows[0].id;
+    }
+
+    const temporaryPassword = crypto.randomBytes(12).toString("base64url");
+    const passwordHash = bcrypt.hashSync(temporaryPassword, 10);
+
+    const userInsert = await client.query(
+      "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+      [email, passwordHash]
+    );
+    const userId = userInsert.rows[0].id;
+
+    await client.query(
+      "INSERT INTO profiles (id, email, full_name, job_title, manager_id) VALUES ($1, $2, $3, $4, $5)",
+      [userId, email, String(fullName).trim(), jobTitle?.trim() || null, resolvedManagerId]
+    );
+
+    await client.query(
+      "INSERT INTO user_roles (user_id, role) VALUES ($1, $2)",
+      [userId, role]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      ok: true,
+      member: {
+        id: userId,
+        email,
+        full_name: String(fullName).trim(),
+        job_title: jobTitle?.trim() || null,
+        role,
+        manager_id: resolvedManagerId,
+        is_active: true,
+      },
+      temporaryPassword,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Create member error:", error);
+    return res.status(500).json({ message: "Error creating team member" });
+  } finally {
+    client.release();
   }
 });
 
