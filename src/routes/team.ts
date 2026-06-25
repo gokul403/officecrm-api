@@ -113,6 +113,56 @@ router.post("/team/active", requireAuth, requireRole(["admin"]), async (req: Aut
   }
 });
 
+// POST /api/team/password
+router.post("/team/password", requireAuth, requireRole(["admin"]), async (req: AuthenticatedRequest, res: Response) => {
+  const { userId, newPassword } = req.body;
+
+  if (!userId || !newPassword) {
+    return res.status(400).json({ message: "userId and newPassword are required" });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: "New password must be at least 6 characters" });
+  }
+
+  try {
+    const userQuery = await pool.query(
+      `SELECT u.id, u.password_hash, p.is_active
+       FROM users u
+       LEFT JOIN profiles p ON p.id = u.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    const user = userQuery.rows[0];
+
+    if (user.is_active === false) {
+      return res.status(403).json({ message: "Account is disabled. Please contact your administrator." });
+    }
+
+    const isSamePassword = bcrypt.compareSync(newPassword, user.password_hash);
+    if (isSamePassword) {
+      return res.status(400).json({ message: "New password must be different from the current password" });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(
+      "UPDATE users SET password_hash = $1 WHERE id = $2",
+      [newHash, userId]
+    );
+
+    return res.json({ ok: true, message: "Password updated successfully" });
+  } catch (error) {
+    console.error("Admin password update error:", error);
+    return res.status(500).json({ message: "Error updating password" });
+  }
+});
+
 // POST /api/team/members
 router.post("/team/members", requireAuth, requireRole(["admin"]), async (req: AuthenticatedRequest, res: Response) => {
   const { email: rawEmail, fullName, jobTitle, role, managerId } = req.body;
