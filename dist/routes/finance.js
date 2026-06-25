@@ -3,8 +3,8 @@ import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 const router = Router();
 // ================= INCOME ROUTES =================
-// GET /api/finance/income - List income
-router.get("/income", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+// GET /api/finance/income - List income (all authenticated roles)
+router.get("/income", requireAuth, async (_req, res) => {
     try {
         const result = await pool.query(`SELECT i.*, c.name as customer_name
        FROM income i
@@ -51,8 +51,8 @@ router.delete("/income/:id", requireAuth, requireRole(["admin"]), async (req, re
     }
 });
 // ================= EXPENSES ROUTES =================
-// GET /api/finance/expenses - List expenses
-router.get("/expenses", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+// GET /api/finance/expenses - List expenses (all authenticated roles)
+router.get("/expenses", requireAuth, async (_req, res) => {
     try {
         const result = await pool.query(`SELECT e.*, p.full_name as paid_by_name
        FROM expenses e
