@@ -4,27 +4,16 @@ import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/au
 
 const router = Router();
 
-// GET /api/customers - List visible customers
-router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user!;
+// GET /api/customers - List all customers (all authenticated roles)
+router.get("/", requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    let query = `
+    const result = await pool.query(`
       SELECT c.*, 
              p_assignee.full_name as assignee_name, p_assignee.email as assignee_email
       FROM customers c
       LEFT JOIN profiles p_assignee ON c.assigned_to = p_assignee.id
-    `;
-    const params: any[] = [];
-
-    // RLS: Employees only see customers assigned to them
-    if (user.role === "employee") {
-      query += " WHERE c.assigned_to = $1";
-      params.push(user.id);
-    }
-
-    query += " ORDER BY c.name ASC";
-
-    const result = await pool.query(query, params);
+      ORDER BY c.name ASC
+    `);
     return res.json(result.rows);
   } catch (error) {
     console.error("List customers error:", error);
@@ -127,19 +116,12 @@ router.delete("/:id", requireAuth, requireRole(["admin", "manager"]), async (req
 
 // GET /api/customers/:customerId/interactions - List interactions
 router.get("/:customerId/interactions", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user!;
   const { customerId } = req.params;
 
   try {
-    // Check access to customer first
-    const customerQuery = await pool.query("SELECT * FROM customers WHERE id = $1", [customerId]);
+    const customerQuery = await pool.query("SELECT id FROM customers WHERE id = $1", [customerId]);
     if (customerQuery.rows.length === 0) {
       return res.status(404).json({ message: "Customer not found" });
-    }
-
-    const customer = customerQuery.rows[0];
-    if (user.role === "employee" && customer.assigned_to !== user.id) {
-      return res.status(403).json({ message: "Forbidden: No access to this customer's interactions" });
     }
 
     const interactionsQuery = await pool.query(

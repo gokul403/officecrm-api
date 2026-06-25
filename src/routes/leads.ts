@@ -4,27 +4,16 @@ import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/au
 
 const router = Router();
 
-// GET /api/leads - List visible leads
-router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user!;
+// GET /api/leads - List all leads (all authenticated roles)
+router.get("/", requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    let query = `
+    const result = await pool.query(`
       SELECT l.*, 
              p_assignee.full_name as assignee_name, p_assignee.email as assignee_email
       FROM leads l
       LEFT JOIN profiles p_assignee ON l.assigned_to = p_assignee.id
-    `;
-    const params: any[] = [];
-
-    // RLS: Employees only see leads assigned to them
-    if (user.role === "employee") {
-      query += " WHERE l.assigned_to = $1";
-      params.push(user.id);
-    }
-
-    query += " ORDER BY l.created_at DESC";
-
-    const result = await pool.query(query, params);
+      ORDER BY l.created_at DESC
+    `);
     return res.json(result.rows);
   } catch (error) {
     console.error("List leads error:", error);
@@ -32,10 +21,13 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =>
   }
 });
 
-// POST /api/leads - Create a lead (admin or manager only)
-router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: AuthenticatedRequest, res: Response) => {
+// POST /api/leads - Create a lead (all authenticated roles)
+router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { name, email, phone, company, source, status, notes, assigned_to } = req.body;
-  const createdBy = req.user!.id;
+  const user = req.user!;
+  const createdBy = user.id;
+  const assignee =
+    assigned_to ?? (user.role === "employee" ? createdBy : null);
 
   if (!name) {
     return res.status(400).json({ message: "Lead name is required" });
@@ -46,7 +38,7 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: Aut
       `INSERT INTO leads (name, email, phone, company, source, status, notes, assigned_to, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [name, email || null, phone || null, company || null, source || null, status || "new", notes || null, assigned_to || null, createdBy]
+      [name, email || null, phone || null, company || null, source || null, status || "new", notes || null, assignee, createdBy]
     );
     return res.status(201).json(result.rows[0]);
   } catch (error) {
