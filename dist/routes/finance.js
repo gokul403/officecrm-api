@@ -65,17 +65,19 @@ router.get("/expenses", requireAuth, async (_req, res) => {
         return res.status(500).json({ message: "Error loading expenses" });
     }
 });
-// POST /api/finance/expenses - Create expense
-router.post("/expenses", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+// POST /api/finance/expenses - Create expense (all authenticated roles)
+router.post("/expenses", requireAuth, async (req, res) => {
     const { amount, category, vendor, description, spent_on, paid_by } = req.body;
-    const createdBy = req.user.id;
+    const user = req.user;
+    const createdBy = user.id;
+    const payer = paid_by ?? (user.role === "employee" ? createdBy : null);
     if (!amount || !category) {
         return res.status(400).json({ message: "Amount and category are required" });
     }
     try {
         const result = await pool.query(`INSERT INTO expenses (amount, category, vendor, description, spent_on, paid_by, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`, [amount, category, vendor || null, description || null, spent_on || new Date().toISOString().split("T")[0], paid_by || null, createdBy]);
+       RETURNING *`, [amount, category, vendor || null, description || null, spent_on || new Date().toISOString().split("T")[0], payer, createdBy]);
         return res.status(201).json(result.rows[0]);
     }
     catch (error) {
