@@ -5,6 +5,7 @@ import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/au
 const router = Router();
 
 // GET /api/tasks - List all visible tasks
+
 router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   try {
