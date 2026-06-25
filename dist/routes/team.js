@@ -5,7 +5,7 @@ import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const router = Router();
-// GET /api/profiles - General route open to all authenticated users (assignee lists, etc.)
+// GET /api/profiles
 router.get("/profiles", requireAuth, async (req, res) => {
     try {
         const result = await pool.query("SELECT id, email, full_name, avatar_url, job_title, is_active FROM profiles ORDER BY full_name ASC");
@@ -16,31 +16,60 @@ router.get("/profiles", requireAuth, async (req, res) => {
         return res.status(500).json({ message: "Error loading profiles" });
     }
 });
-// GET /api/team - List profiles and user_roles (admin and manager only)
+// GET /api/team
 router.get("/team", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
     try {
         const profilesResult = await pool.query("SELECT id, email, full_name, avatar_url, job_title, is_active, manager_id FROM profiles ORDER BY email ASC");
         const rolesResult = await pool.query("SELECT user_id, role FROM user_roles");
-        return res.json({
-            profiles: profilesResult.rows,
-            roles: rolesResult.rows,
-        });
+        return res.json({ profiles: profilesResult.rows, roles: rolesResult.rows });
     }
     catch (error) {
         console.error("Get team details error:", error);
         return res.status(500).json({ message: "Error loading team details" });
     }
 });
-// POST /api/team/role - Update user role (admin only)
+// POST /api/team/update-member/:id - Update profile fields (admin only)
+router.post("/team/update-member/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const { id } = req.params;
+    const { fullName, jobTitle } = req.body;
+    if (fullName === undefined && jobTitle === undefined) {
+        return res.status(400).json({ message: "Provide at least one of fullName or jobTitle" });
+    }
+    if (fullName !== undefined && String(fullName).trim().length === 0) {
+        return res.status(400).json({ message: "fullName cannot be empty" });
+    }
+    try {
+        const fields = [];
+        const values = [];
+        if (fullName !== undefined) {
+            values.push(String(fullName).trim());
+            fields.push(`full_name = $${values.length}`);
+        }
+        if (jobTitle !== undefined) {
+            values.push(jobTitle === "" ? null : String(jobTitle).trim());
+            fields.push(`job_title = $${values.length}`);
+        }
+        values.push(id);
+        const query = `UPDATE profiles SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, email, full_name, job_title, is_active`;
+        const result = await pool.query(query, values);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Member not found" });
+        }
+        return res.json({ ok: true, member: result.rows[0] });
+    }
+    catch (error) {
+        console.error("Update member profile error:", error);
+        return res.status(500).json({ message: "Error updating member profile" });
+    }
+});
+// POST /api/team/role
 router.post("/team/role", requireAuth, requireRole(["admin"]), async (req, res) => {
     const { userId, role } = req.body;
-    if (!userId || !role) {
+    if (!userId || !role)
         return res.status(400).json({ message: "userId and role are required" });
-    }
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        // Replace roles (delete then insert)
         await client.query("DELETE FROM user_roles WHERE user_id = $1", [userId]);
         await client.query("INSERT INTO user_roles (user_id, role) VALUES ($1, $2)", [userId, role]);
         await client.query("COMMIT");
@@ -55,12 +84,11 @@ router.post("/team/role", requireAuth, requireRole(["admin"]), async (req, res) 
         client.release();
     }
 });
-// POST /api/team/active - Toggle user active status (admin only)
+// POST /api/team/active
 router.post("/team/active", requireAuth, requireRole(["admin"]), async (req, res) => {
     const { userId, active } = req.body;
-    if (!userId || active === undefined) {
+    if (!userId || active === undefined)
         return res.status(400).json({ message: "userId and active boolean are required" });
-    }
     try {
         await pool.query("UPDATE profiles SET is_active = $1 WHERE id = $2", [active, userId]);
         return res.json({ ok: true });
@@ -70,22 +98,18 @@ router.post("/team/active", requireAuth, requireRole(["admin"]), async (req, res
         return res.status(500).json({ message: "Error updating user status" });
     }
 });
-// POST /api/team/members - Create a manager or employee (admin only)
+// POST /api/team/members
 router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, res) => {
     const { email: rawEmail, fullName, jobTitle, role, managerId } = req.body;
-    if (!rawEmail || !fullName || !role) {
+    if (!rawEmail || !fullName || !role)
         return res.status(400).json({ message: "email, fullName, and role are required" });
-    }
     const email = String(rawEmail).trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) {
+    if (!EMAIL_RE.test(email))
         return res.status(400).json({ message: "Invalid email address" });
-    }
-    if (role !== "manager" && role !== "employee") {
+    if (role !== "manager" && role !== "employee")
         return res.status(400).json({ message: "role must be manager or employee" });
-    }
-    if (role === "employee" && !managerId) {
+    if (role === "employee" && !managerId)
         return res.status(400).json({ message: "managerId is required for employees" });
-    }
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
@@ -115,13 +139,10 @@ router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, re
         return res.status(201).json({
             ok: true,
             member: {
-                id: userId,
-                email,
+                id: userId, email,
                 full_name: String(fullName).trim(),
                 job_title: jobTitle?.trim() || null,
-                role,
-                manager_id: resolvedManagerId,
-                is_active: true,
+                role, manager_id: resolvedManagerId, is_active: true,
             },
             temporaryPassword,
         });
@@ -135,7 +156,7 @@ router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, re
         client.release();
     }
 });
-// POST /api/team/seed - Re-seed or create demo data (admin only)
+// POST /api/team/seed
 router.post("/team/seed", requireAuth, requireRole(["admin"]), async (req, res) => {
     const callerId = req.user.id;
     const DEMO_PASSWORD = "Demo1234!";
@@ -148,7 +169,6 @@ router.post("/team/seed", requireAuth, requireRole(["admin"]), async (req, res) 
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        console.log("Seeding demo data from backend...");
         const createdProfiles = [];
         for (const u of DEMO_USERS) {
             let userId;
@@ -167,13 +187,11 @@ router.post("/team/seed", requireAuth, requireRole(["admin"]), async (req, res) 
             }
             createdProfiles.push({ id: userId, email: u.email, role: u.role });
         }
-        // Connect employees to manager
         const manager = createdProfiles.find((p) => p.role === "manager");
         const employees = createdProfiles.filter((p) => p.role === "employee");
         if (manager) {
             await client.query("UPDATE profiles SET manager_id = $1 WHERE id = ANY($2::uuid[])", [manager.id, employees.map((e) => e.id)]);
         }
-        // Seed tasks if empty
         const tasksCount = await client.query("SELECT count(*) FROM tasks");
         if (parseInt(tasksCount.rows[0].count) === 0) {
             const allAssignees = [callerId, ...employees.map((e) => e.id)];
