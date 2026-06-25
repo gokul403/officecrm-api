@@ -45,7 +45,7 @@ async function migrate() {
 
     // 3. Tables
     console.log("Creating tables...");
-    
+
     // USERS (Custom authentication table)
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -124,6 +124,10 @@ async function migrate() {
         notes TEXT,
         assigned_to UUID REFERENCES profiles(id) ON DELETE SET NULL,
         created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        interested_product TEXT,
+        possibility TEXT,
+        followup_date TIMESTAMPTZ,
+        expected_revenue NUMERIC,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
@@ -231,7 +235,7 @@ async function migrate() {
           [u.email, passwordHash]
         );
         userId = userInsert.rows[0].id;
-        
+
         // Insert into profiles
         await client.query(
           "INSERT INTO profiles (id, email, full_name, job_title) VALUES ($1, $2, $3, $4)",
