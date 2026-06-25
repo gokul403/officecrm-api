@@ -113,6 +113,10 @@ async function migrate() {
         notes TEXT,
         assigned_to UUID REFERENCES profiles(id) ON DELETE SET NULL,
         created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        interested_product TEXT,
+        possibility TEXT,
+        followup_date TIMESTAMPTZ,
+        expected_revenue NUMERIC,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )

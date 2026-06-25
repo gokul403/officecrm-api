@@ -19,19 +19,17 @@ router.get("/", requireAuth, async (_req, res) => {
         return res.status(500).json({ message: "Error loading leads" });
     }
 });
-// POST /api/leads - Create a lead (all authenticated roles)
-router.post("/", requireAuth, async (req, res) => {
-    const { name, email, phone, company, source, status, notes, assigned_to } = req.body;
-    const user = req.user;
-    const createdBy = user.id;
-    const assignee = assigned_to ?? (user.role === "employee" ? createdBy : null);
+// POST /api/leads - Create a lead (admin or manager only)
+router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+    const { name, email, phone, company, source, status, notes, assigned_to, interested_product, possibility, followup_date, expected_revenue } = req.body;
+    const createdBy = req.user.id;
     if (!name) {
         return res.status(400).json({ message: "Lead name is required" });
     }
     try {
-        const result = await pool.query(`INSERT INTO leads (name, email, phone, company, source, status, notes, assigned_to, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`, [name, email || null, phone || null, company || null, source || null, status || "new", notes || null, assignee, createdBy]);
+        const result = await pool.query(`INSERT INTO leads (name, email, phone, company, source, status, notes, assigned_to, created_by, interested_product, possibility, followup_date, expected_revenue)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`, [name, email || null, phone || null, company || null, source || null, status || "new", notes || null, assigned_to || null, createdBy, interested_product || null, possibility || null, followup_date || null, expected_revenue || null,]);
         return res.status(201).json(result.rows[0]);
     }
     catch (error) {
@@ -58,7 +56,7 @@ router.put("/:id", requireAuth, async (req, res) => {
         const fields = [];
         const values = [];
         let valIndex = 1;
-        const allowedKeys = ["name", "email", "phone", "company", "source", "status", "notes", "assigned_to"];
+        const allowedKeys = ["name", "email", "phone", "company", "source", "status", "notes", "assigned_to", "interested_product", "possibility", "followup_date", "expected_revenue"];
         for (const key of allowedKeys) {
             if (updates[key] !== undefined) {
                 fields.push(`${key} = $${valIndex++}`);
