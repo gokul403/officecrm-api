@@ -21,8 +21,8 @@ router.get("/profiles", requireAuth, async (req: AuthenticatedRequest, res: Resp
   }
 });
 
-// GET /api/team
-router.get("/team", requireAuth, requireRole(["admin", "manager"]), async (req: AuthenticatedRequest, res: Response) => {
+// GET /api/team — all authenticated users can view; mutations remain admin-only
+router.get("/team", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const profilesResult = await pool.query(
       "SELECT id, email, full_name, avatar_url, job_title, is_active, manager_id FROM profiles ORDER BY email ASC"
