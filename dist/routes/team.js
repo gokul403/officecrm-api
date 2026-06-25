@@ -16,8 +16,8 @@ router.get("/profiles", requireAuth, async (req, res) => {
         return res.status(500).json({ message: "Error loading profiles" });
     }
 });
-// GET /api/team
-router.get("/team", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+// GET /api/team — all authenticated users can view; mutations remain admin-only
+router.get("/team", requireAuth, async (req, res) => {
     try {
         const profilesResult = await pool.query("SELECT id, email, full_name, avatar_url, job_title, is_active, manager_id FROM profiles ORDER BY email ASC");
         const rolesResult = await pool.query("SELECT user_id, role FROM user_roles");
