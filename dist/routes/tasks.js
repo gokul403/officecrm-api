@@ -4,24 +4,17 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 const router = Router();
 // GET /api/tasks - List visible tasks
 router.get("/", requireAuth, async (req, res) => {
-    const user = req.user;
     try {
-        let query = `
+        const query = `
       SELECT t.*, 
              p_assignee.full_name as assignee_name, p_assignee.email as assignee_email,
              p_creator.full_name as creator_name, p_creator.email as creator_email
       FROM tasks t
       LEFT JOIN profiles p_assignee ON t.assigned_to = p_assignee.id
       LEFT JOIN profiles p_creator ON t.created_by = p_creator.id
+      ORDER BY t.due_date ASC, t.created_at DESC
     `;
-        const params = [];
-        // Employees only see tasks assigned to them or created by them
-        if (user.role === "employee") {
-            query += " WHERE t.assigned_to = $1 OR t.created_by = $1";
-            params.push(user.id);
-        }
-        query += " ORDER BY t.due_date ASC, t.created_at DESC";
-        const result = await pool.query(query, params);
+        const result = await pool.query(query);
         return res.json(result.rows);
     }
     catch (error) {
@@ -31,7 +24,6 @@ router.get("/", requireAuth, async (req, res) => {
 });
 // GET /api/tasks/:id - Fetch single task
 router.get("/:id", requireAuth, async (req, res) => {
-    const user = req.user;
     const { id } = req.params;
     try {
         const taskQuery = await pool.query("SELECT * FROM tasks WHERE id = $1", [id]);
@@ -39,9 +31,6 @@ router.get("/:id", requireAuth, async (req, res) => {
             return res.status(404).json({ message: "Task not found" });
         }
         const task = taskQuery.rows[0];
-        if (user.role === "employee" && task.assigned_to !== user.id && task.created_by !== user.id) {
-            return res.status(403).json({ message: "Forbidden: No access to this task" });
-        }
         return res.json(task);
     }
     catch (error) {
@@ -87,9 +76,9 @@ router.put("/:id", requireAuth, async (req, res) => {
             return res.status(404).json({ message: "Task not found" });
         }
         const task = taskQuery.rows[0];
-        // RLS: only admin, manager, or assigned_to can update
+        // RLS: only admin, manager, employee, or assigned_to can update
         const isAssignee = task.assigned_to === user.id;
-        const isAllowed = user.role === "admin" || user.role === "manager" || isAssignee;
+        const isAllowed = user.role === "admin" || user.role === "manager" || user.role === "employee" || isAssignee;
         if (!isAllowed) {
             return res.status(403).json({ message: "Forbidden: No permission to update this task" });
         }
