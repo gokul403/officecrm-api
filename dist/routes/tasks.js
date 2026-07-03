@@ -144,9 +144,6 @@ router.get("/:taskId/comments", requireAuth, async (req, res) => {
             return res.status(404).json({ message: "Task not found" });
         }
         const task = taskQuery.rows[0];
-        if (user.role === "employee" && task.assigned_to !== user.id && task.created_by !== user.id) {
-            return res.status(403).json({ message: "Forbidden: No access to this task's comments" });
-        }
         const commentsQuery = await pool.query(`SELECT c.*, p.full_name as author_name, p.avatar_url as author_avatar, p.email as author_email
        FROM task_comments c
        LEFT JOIN profiles p ON c.user_id = p.id
@@ -174,9 +171,6 @@ router.post("/:taskId/comments", requireAuth, async (req, res) => {
             return res.status(404).json({ message: "Task not found" });
         }
         const task = taskQuery.rows[0];
-        if (user.role === "employee" && task.assigned_to !== user.id && task.created_by !== user.id) {
-            return res.status(403).json({ message: "Forbidden: Cannot comment on this task" });
-        }
         const result = await pool.query(`INSERT INTO task_comments (task_id, user_id, content)
        VALUES ($1, $2, $3)
        RETURNING *`, [taskId, user.id, content]);

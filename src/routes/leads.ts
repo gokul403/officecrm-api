@@ -21,8 +21,8 @@ router.get("/", requireAuth, async (_req: AuthenticatedRequest, res: Response) =
   }
 });
 
-// POST /api/leads - Create a lead (admin or manager only)
-router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: AuthenticatedRequest, res: Response) => {
+// POST /api/leads - Create a lead (all authenticated roles)
+router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { name, email, phone, company, source, status, notes, assigned_to, interested_product, possibility, followup_date, expected_revenue } = req.body;
   const createdBy = req.user!.id;
 
@@ -58,7 +58,7 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
 
     const lead = leadQuery.rows[0];
     const isAssignee = lead.assigned_to === user.id;
-    const isAllowed = user.role === "admin" || user.role === "manager" || isAssignee;
+    const isAllowed = user.role === "admin" || user.role === "manager" || user.role === "employee" || isAssignee;
 
     if (!isAllowed) {
       return res.status(403).json({ message: "Forbidden: No permission to update this lead" });
