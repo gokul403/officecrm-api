@@ -83,13 +83,39 @@ async function migrate() {
         status task_status NOT NULL DEFAULT 'pending',
         priority task_priority NOT NULL DEFAULT 'medium',
         due_date TIMESTAMPTZ,
-        assigned_to UUID REFERENCES profiles(id) ON DELETE SET NULL,
         created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
         completed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+        // TASK ASSIGNEES (Junction table for multiple assignees)
+        await client.query(`
+      CREATE TABLE IF NOT EXISTS task_assignees (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (task_id, profile_id)
+      )
+    `);
+        // Data migration: Copy existing assigned_to in tasks to task_assignees and drop column
+        const hasAssignedToCol = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='tasks' AND column_name='assigned_to'
+    `);
+        if (hasAssignedToCol.rows.length > 0) {
+            console.log("Migrating existing tasks.assigned_to data to task_assignees table...");
+            await client.query(`
+        INSERT INTO task_assignees (task_id, profile_id)
+        SELECT id, assigned_to FROM tasks
+        WHERE assigned_to IS NOT NULL
+        ON CONFLICT (task_id, profile_id) DO NOTHING
+      `);
+            console.log("Dropping assigned_to column from tasks table...");
+            await client.query(`ALTER TABLE tasks DROP COLUMN assigned_to`);
+        }
         // COMMENTS
         await client.query(`
       CREATE TABLE IF NOT EXISTS task_comments (
@@ -272,15 +298,25 @@ async function migrate() {
         (680.00, 'Travel', 'Delta', 'Client visit flights', CURRENT_DATE - 2, '${managerId}', '${adminId}');
       `);
             // 6f. Tasks
-            await client.query(`
-        INSERT INTO tasks (title, description, priority, status, due_date, assigned_to, created_by, completed_at) VALUES
-        ('Onboard Acme Corp', 'Send welcome packet and schedule kick-off call.', 'high', 'in_progress', CURRENT_DATE + 2, '${employee1Id}', '${managerId}', NULL),
-        ('Quarterly performance review prep', 'Compile KPIs for Q review.', 'medium', 'pending', CURRENT_DATE + 7, '${employee1Id}', '${managerId}', NULL),
-        ('Fix invoice template footer', 'Logo overlapping address block.', 'low', 'pending', CURRENT_DATE + 4, '${employee1Id}', '${managerId}', NULL),
-        ('Follow up with Globex lead', 'Send proposal v2 with updated pricing.', 'critical', 'pending', CURRENT_DATE + 1, '${managerId}', '${managerId}', NULL),
-        ('Update employee handbook', 'Add new PTO policy.', 'medium', 'completed', CURRENT_DATE - 3, '${userIds["employee2@demo.com"]}', '${adminId}', CURRENT_DATE - 3),
-        ('Renew SSL certificate', 'Production cert expires soon.', 'high', 'in_progress', CURRENT_DATE + 10, '${userIds["employee3@demo.com"]}', '${adminId}', NULL);
-      `);
+            const SAMPLE_TASKS = [
+                { title: "Onboard Acme Corp", description: "Send welcome packet and schedule kick-off call.", priority: "high", status: "in_progress", offsetDays: 2, assigneeId: employee1Id, createdBy: managerId },
+                { title: "Quarterly performance review prep", description: "Compile KPIs for Q review.", priority: "medium", status: "pending", offsetDays: 7, assigneeId: employee1Id, createdBy: managerId },
+                { title: "Fix invoice template footer", description: "Logo overlapping address block.", priority: "low", status: "pending", offsetDays: 4, assigneeId: employee1Id, createdBy: managerId },
+                { title: "Follow up with Globex lead", description: "Send proposal v2 with updated pricing.", priority: "critical", status: "pending", offsetDays: 1, assigneeId: managerId, createdBy: managerId },
+                { title: "Update employee handbook", description: "Add new PTO policy.", priority: "medium", status: "completed", offsetDays: -3, assigneeId: userIds["employee2@demo.com"], createdBy: adminId },
+                { title: "Renew SSL certificate", description: "Production cert expires soon.", priority: "high", status: "in_progress", offsetDays: 10, assigneeId: userIds["employee3@demo.com"], createdBy: adminId },
+            ];
+            for (const t of SAMPLE_TASKS) {
+                const dueDate = new Date(Date.now() + t.offsetDays * 86400000).toISOString();
+                const completedAt = t.status === "completed" ? new Date().toISOString() : null;
+                const taskInsert = await client.query(`INSERT INTO tasks (title, description, priority, status, due_date, created_by, completed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id`, [t.title, t.description, t.priority, t.status, dueDate, t.createdBy, completedAt]);
+                const taskId = taskInsert.rows[0].id;
+                if (t.assigneeId) {
+                    await client.query(`INSERT INTO task_assignees (task_id, profile_id) VALUES ($1, $2)`, [taskId, t.assigneeId]);
+                }
+            }
         }
         await client.query("COMMIT");
         console.log("Database schema migrated and seeded successfully!");

@@ -243,8 +243,13 @@ router.post("/team/seed", requireAuth, requireRole(["admin"]), async (req, res) 
                 const assignedTo = allAssignees[i % allAssignees.length];
                 const dueDate = new Date(now + t.offsetDays * 86400000).toISOString();
                 const completedAt = t.status === "completed" ? new Date().toISOString() : null;
-                await client.query(`INSERT INTO tasks (title, description, priority, status, due_date, assigned_to, created_by, completed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [t.title, t.description, t.priority, t.status, dueDate, assignedTo, callerId, completedAt]);
+                const taskInsert = await client.query(`INSERT INTO tasks (title, description, priority, status, due_date, created_by, completed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id`, [t.title, t.description, t.priority, t.status, dueDate, callerId, completedAt]);
+                const taskId = taskInsert.rows[0].id;
+                if (assignedTo) {
+                    await client.query(`INSERT INTO task_assignees (task_id, profile_id) VALUES ($1, $2)`, [taskId, assignedTo]);
+                }
             }
         }
         await client.query("COMMIT");
