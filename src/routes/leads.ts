@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/auth.js";
+import { notifyLeadAssignment } from "../services/email.js";
 
 const router = Router();
 
@@ -37,7 +38,21 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =
        RETURNING *`,
       [name, email || null, phone || null, company || null, source || null, status || "new", notes || null, assigned_to || null, createdBy, interested_product || null, possibility || null, followup_date || null, expected_revenue || null,]
     );
-    return res.status(201).json(result.rows[0]);
+    const newLead = result.rows[0];
+
+    if (assigned_to) {
+      const assigneeResult = await pool.query(
+        "SELECT id, full_name, email FROM profiles WHERE id = $1",
+        [assigned_to]
+      );
+      if (assigneeResult.rows.length > 0) {
+        notifyLeadAssignment(newLead, assigneeResult.rows[0]).catch((err) => {
+          console.error("[Email Trigger] Fail to send lead assignment email:", err);
+        });
+      }
+    }
+
+    return res.status(201).json(newLead);
   } catch (error) {
     console.error("Create lead error:", error);
     return res.status(500).json({ message: "Error creating lead" });

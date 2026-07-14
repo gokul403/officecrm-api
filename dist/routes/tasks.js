@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
+import { notifyTaskAssignment, notifyTaskUpdate } from "../services/email.js";
 const router = Router();
 // GET /api/tasks - List visible tasks
 router.get("/", requireAuth, async (req, res) => {
@@ -106,6 +107,11 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req, res
             }
         }
         await client.query("COMMIT");
+        if (assignees.length > 0) {
+            notifyTaskAssignment(newTask, assignees).catch((err) => {
+                console.error("[Email Trigger] Fail to send assignment emails:", err);
+            });
+        }
         return res.status(201).json({
             ...newTask,
             assignees
@@ -187,6 +193,11 @@ router.put("/:id", requireAuth, async (req, res) => {
       `, [id]);
             const updatedTask = populatedResult.rows[0];
             await client.query("COMMIT");
+            if (assigneesResult.rows.length > 0) {
+                notifyTaskUpdate(updatedTask, assigneesResult.rows).catch((err) => {
+                    console.error("[Email Trigger] Fail to send update emails:", err);
+                });
+            }
             return res.json({
                 ...updatedTask,
                 assignees: assigneesResult.rows
