@@ -9,6 +9,8 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =>
   try {
     const query = `
       SELECT t.*, 
+             p.name as project_name,
+             p.project_code as project_code,
              coalesce(
                json_agg(
                  json_build_object('id', p_assignee.id, 'full_name', p_assignee.full_name, 'email', p_assignee.email)
@@ -17,10 +19,11 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =>
              ) as assignees,
              p_creator.full_name as creator_name, p_creator.email as creator_email
       FROM tasks t
+      LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN task_assignees ta ON t.id = ta.task_id
       LEFT JOIN profiles p_assignee ON ta.profile_id = p_assignee.id
       LEFT JOIN profiles p_creator ON t.created_by = p_creator.id
-      GROUP BY t.id, p_creator.id
+      GROUP BY t.id, p.id, p_creator.id
       ORDER BY t.due_date ASC, t.created_at DESC
     `;
     const result = await pool.query(query);
@@ -38,6 +41,8 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
   try {
     const query = `
       SELECT t.*, 
+             p.name as project_name,
+             p.project_code as project_code,
              coalesce(
                json_agg(
                  json_build_object('id', p_assignee.id, 'full_name', p_assignee.full_name, 'email', p_assignee.email)
@@ -45,10 +50,11 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
                '[]'
              ) as assignees
       FROM tasks t
+      LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN task_assignees ta ON t.id = ta.task_id
       LEFT JOIN profiles p_assignee ON ta.profile_id = p_assignee.id
       WHERE t.id = $1
-      GROUP BY t.id
+      GROUP BY t.id, p.id
     `;
     const taskQuery = await pool.query(query, [id]);
     if (taskQuery.rows.length === 0) {
@@ -65,7 +71,7 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
 
 // POST /api/tasks - Create task (admin or manager only)
 router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: AuthenticatedRequest, res: Response) => {
-  const { title, description, status, priority, due_date, assignee_ids } = req.body;
+  const { title, description, status, priority, due_date, assignee_ids, project_id } = req.body;
   const createdBy = req.user!.id;
 
   if (!title) {
@@ -77,8 +83,8 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: Aut
     await client.query("BEGIN");
 
     const result = await client.query(
-      `INSERT INTO tasks (title, description, status, priority, due_date, created_by, completed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO tasks (title, description, status, priority, due_date, created_by, completed_at, project_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         title,
@@ -88,9 +94,19 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: Aut
         due_date || null,
         createdBy,
         status === "completed" ? new Date().toISOString() : null,
+        project_id || null,
       ]
     );
-    const newTask = result.rows[0];
+    const initialTask = result.rows[0];
+    
+    const newTaskResult = await client.query(
+      `SELECT t.*, p.name as project_name, p.project_code as project_code
+       FROM tasks t
+       LEFT JOIN projects p ON t.project_id = p.id
+       WHERE t.id = $1`,
+      [initialTask.id]
+    );
+    const newTask = newTaskResult.rows[0];
 
     const assignees: any[] = [];
     if (Array.isArray(assignee_ids) && assignee_ids.length > 0) {
@@ -158,7 +174,7 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
       const values: any[] = [];
       let valIndex = 1;
 
-      const allowedKeys = ["title", "description", "status", "priority", "due_date", "completed_at"];
+      const allowedKeys = ["title", "description", "status", "priority", "due_date", "completed_at", "project_id"];
 
       for (const key of allowedKeys) {
         if (updates[key] !== undefined) {
@@ -172,17 +188,14 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
         values.push(updates.status === "completed" ? new Date().toISOString() : null);
       }
 
-      let updatedTask = task;
       if (fields.length > 0) {
         values.push(id);
         const updateQuery = `
           UPDATE tasks 
           SET ${fields.join(", ")}
           WHERE id = $${valIndex}
-          RETURNING *
         `;
-        const result = await client.query(updateQuery, values);
-        updatedTask = result.rows[0];
+        await client.query(updateQuery, values);
       }
 
       if (updates.assignee_ids !== undefined) {
@@ -205,6 +218,15 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
          WHERE ta.task_id = $1`,
         [id]
       );
+
+      // Fetch fully populated updated task details with project information
+      const populatedResult = await client.query(`
+        SELECT t.*, pr.name as project_name, pr.project_code as project_code
+        FROM tasks t
+        LEFT JOIN projects pr ON t.project_id = pr.id
+        WHERE t.id = $1
+      `, [id]);
+      const updatedTask = populatedResult.rows[0];
 
       await client.query("COMMIT");
       return res.json({

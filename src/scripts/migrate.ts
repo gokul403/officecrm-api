@@ -83,6 +83,19 @@ async function migrate() {
       )
     `);
 
+    // PROJECTS SEQUENCE & TABLE
+    await client.query(`CREATE SEQUENCE IF NOT EXISTS project_seq START WITH 101`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_code TEXT UNIQUE NOT NULL DEFAULT 'PRJ-' || nextval('project_seq')::text,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
     // TASKS
     await client.query(`
       CREATE TABLE IF NOT EXISTS tasks (
@@ -98,6 +111,12 @@ async function migrate() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+
+    // Alter tasks table to add project_id if not exists
+    await client.query(`
+      ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL
+    `);
+
 
     // TASK ASSIGNEES (Junction table for multiple assignees)
     await client.query(`
@@ -235,7 +254,7 @@ async function migrate() {
       $$ LANGUAGE plpgsql;
     `);
 
-    const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses"];
+    const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses", "projects"];
     for (const table of tablesForTrigger) {
       await client.query(`DROP TRIGGER IF EXISTS trg_${table}_updated_at ON ${table}`);
       await client.query(`

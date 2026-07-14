@@ -7,6 +7,7 @@ import leadsRouter from "./routes/leads.js";
 import customersRouter from "./routes/customers.js";
 import financeRouter from "./routes/finance.js";
 import teamRouter from "./routes/team.js";
+import projectsRouter from "./routes/projects.js";
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -21,6 +22,7 @@ app.use((req, _res, next) => {
 // API Routes
 app.use("/api/auth", authRouter);
 app.use("/api/tasks", tasksRouter);
+app.use("/api/projects", projectsRouter);
 app.use("/api/leads", leadsRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/finance", financeRouter);
