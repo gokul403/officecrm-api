@@ -84,7 +84,7 @@ export async function notifyTaskAssignment(
         </table>
 
         <div style="margin-top: 30px; text-align: center;">
-          <a href="http://localhost:3000/tasks" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+          <a href="https://pulse-office-crm.vercel.app/tasks" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
             View Workspace Tasks
           </a>
         </div>
