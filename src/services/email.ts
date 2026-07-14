@@ -3,7 +3,7 @@ dotenv.config();
 
 const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 const apiKey = process.env.BREVO_API_KEY;
-const senderEmail = process.env.BREVO_SENDER_EMAIL || "info@tectxcore.com";
+const senderEmail = process.env.BREVO_SENDER_EMAIL || "gokulkm9@gmail.com";
 const senderName = process.env.BREVO_SENDER_NAME || "OfficeFlow CRM";
 
 export async function sendTransactionalEmail(
