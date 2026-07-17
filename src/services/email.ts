@@ -135,7 +135,7 @@ export async function notifyTaskUpdate(
         </table>
 
         <div style="margin-top: 30px; text-align: center;">
-          <a href="http://localhost:3000/tasks" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);">
+          <a href="https://pulse-office-crm.vercel.app/tasks" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);">
             View Workspace Tasks
           </a>
         </div>
@@ -182,7 +182,7 @@ export async function notifyLeadAssignment(
         </table>
 
         <div style="margin-top: 30px; text-align: center;">
-          <a href="http://localhost:3000/leads" style="background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);">
+          <a href="https://pulse-office-crm.vercel.app/leads" style="background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);">
             View CRM Leads
           </a>
         </div>
