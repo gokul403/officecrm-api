@@ -2,6 +2,7 @@ import { pool } from "../config/db.js";
 import { getAIProvider, } from "../ai/index.js";
 import { retrieveAssignedTasks, scheduleTaskEmbedding } from "./task-embeddings.js";
 import { normalizePhoneDigits, phonesMatchLocal, toLocalPhoneDigits, sendWhatsAppToChatId, } from "./whatsapp.js";
+import { getTaskByNumber, saveTaskList, } from "./whatsapp-task-session.js";
 const MAX_TOOL_ROUNDS = 4;
 const TASK_BOT_TOOLS = [
     {
@@ -97,7 +98,147 @@ async function assertAssigned(taskId, profileId) {
     const result = await pool.query(`SELECT 1 FROM task_assignees WHERE task_id = $1 AND profile_id = $2`, [taskId, profileId]);
     return result.rows.length > 0;
 }
-async function executeTool(call, profileId) {
+function formatTaskListMessage(items, rows) {
+    if (items.length === 0) {
+        return "You have no assigned tasks right now.";
+    }
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const lines = items.map((item) => {
+        const row = byId.get(item.taskId);
+        const status = row?.status?.replace(/_/g, " ") ?? "unknown";
+        const priority = row?.priority ?? "medium";
+        const due = row?.due_date
+            ? new Date(row.due_date).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+            })
+            : "no due date";
+        return `${item.n}. ${item.title}\n   Status: ${status} · Priority: ${priority} · Due: ${due}`;
+    });
+    return [
+        `You have ${items.length} assigned task${items.length === 1 ? "" : "s"}:`,
+        "",
+        ...lines,
+        "",
+        "Quick actions (use the number from the list):",
+        '• Mark complete: "1 done"',
+        '• Change status: "1 in progress" or "1 pending"',
+        '• Add a note: "2: waiting on client"',
+        '• View details: "3" or "details 3"',
+    ].join("\n");
+}
+function formatDetailsMessage(toolJson) {
+    try {
+        const parsed = JSON.parse(toolJson);
+        if (parsed.error)
+            return parsed.error;
+        const task = parsed.task;
+        if (!task)
+            return "Task not found.";
+        const lines = [
+            `*${task.title ?? "Task"}*`,
+            `Status: ${task.status ?? "—"} · Priority: ${task.priority ?? "—"}`,
+        ];
+        if (task.due_date)
+            lines.push(`Due: ${task.due_date}`);
+        if (task.project_name)
+            lines.push(`Project: ${task.project_name}`);
+        if (task.description)
+            lines.push("", task.description);
+        const updates = parsed.recent_updates ?? [];
+        if (updates.length > 0) {
+            lines.push("", "Recent updates:");
+            for (const u of updates.slice(0, 3)) {
+                const who = u.author_name ?? "Someone";
+                lines.push(`• ${who}: ${u.content ?? ""}`);
+            }
+        }
+        return lines.join("\n");
+    }
+    catch {
+        return "Could not load task details.";
+    }
+}
+function parseShortCommand(text) {
+    const t = text.trim();
+    let m = t.match(/^details?\s+(\d+)\s*$/i);
+    if (m)
+        return { kind: "details", n: Number(m[1]) };
+    m = t.match(/^(\d+)\s+(done|completed|in\s+progress|pending)\s*$/i);
+    if (m) {
+        const raw = m[2].toLowerCase().replace(/\s+/g, " ");
+        let status;
+        if (raw === "done" || raw === "completed")
+            status = "completed";
+        else if (raw === "in progress")
+            status = "in_progress";
+        else
+            status = "pending";
+        return { kind: "status", n: Number(m[1]), status };
+    }
+    m = t.match(/^(\d+)\s*[:\-]\s*(.+)$/s);
+    if (m && m[2].trim()) {
+        return { kind: "update", n: Number(m[1]), content: m[2].trim() };
+    }
+    m = t.match(/^(\d+)\s*$/);
+    if (m)
+        return { kind: "details", n: Number(m[1]) };
+    return null;
+}
+async function handleShortCommand(params) {
+    const { command, phoneLocal, profileId, replyChatId } = params;
+    const item = getTaskByNumber(phoneLocal, command.n);
+    if (!item) {
+        await sendWhatsAppToChatId(replyChatId, "No recent numbered list, or that number isn’t valid. Send “list my tasks” first.");
+        return;
+    }
+    if (command.kind === "status") {
+        const toolResult = await executeTool({
+            id: "short-status",
+            name: "update_task_status",
+            arguments: { task_id: item.taskId, status: command.status },
+        }, profileId, phoneLocal);
+        try {
+            const parsed = JSON.parse(toolResult);
+            if (parsed.error) {
+                await sendWhatsAppToChatId(replyChatId, parsed.error);
+                return;
+            }
+            await sendWhatsAppToChatId(replyChatId, `Marked “${parsed.task?.title ?? item.title}” as ${parsed.task?.status ?? command.status}.`);
+        }
+        catch {
+            await sendWhatsAppToChatId(replyChatId, "Could not update task status.");
+        }
+        return;
+    }
+    if (command.kind === "update") {
+        const toolResult = await executeTool({
+            id: "short-update",
+            name: "add_task_update",
+            arguments: { task_id: item.taskId, content: command.content },
+        }, profileId, phoneLocal);
+        try {
+            const parsed = JSON.parse(toolResult);
+            if (parsed.error) {
+                await sendWhatsAppToChatId(replyChatId, parsed.error);
+                return;
+            }
+            await sendWhatsAppToChatId(replyChatId, `Added update on “${item.title}”: ${command.content}`);
+        }
+        catch {
+            await sendWhatsAppToChatId(replyChatId, "Could not add task update.");
+        }
+        return;
+    }
+    const toolResult = await executeTool({
+        id: "short-details",
+        name: "get_task_details",
+        arguments: { task_id: item.taskId },
+    }, profileId, phoneLocal);
+    await sendWhatsAppToChatId(replyChatId, formatDetailsMessage(toolResult));
+}
+async function executeTool(call, profileId, phoneLocal) {
     const args = call.arguments ?? {};
     switch (call.name) {
         case "list_my_tasks": {
@@ -114,7 +255,29 @@ async function executeTool(call, profileId) {
             }
             sql += ` ORDER BY t.due_date NULLS LAST, t.created_at DESC LIMIT 20`;
             const result = await pool.query(sql, params);
-            return JSON.stringify(result.rows);
+            const rows = result.rows;
+            let numbered = [];
+            if (phoneLocal) {
+                numbered = saveTaskList(phoneLocal, rows.map((r) => ({ taskId: r.id, title: r.title })));
+            }
+            else {
+                numbered = rows.map((r, i) => ({
+                    n: i + 1,
+                    taskId: r.id,
+                    title: r.title,
+                }));
+            }
+            return JSON.stringify({
+                tasks: rows.map((r, i) => ({
+                    n: numbered[i]?.n ?? i + 1,
+                    id: r.id,
+                    title: r.title,
+                    status: r.status,
+                    priority: r.priority,
+                    due_date: r.due_date,
+                })),
+                formatted: formatTaskListMessage(numbered, rows),
+            });
         }
         case "get_task_details": {
             const taskId = String(args.task_id ?? "");
@@ -181,6 +344,7 @@ function buildSystemPrompt(userName, ragContext) {
         "Help them identify assigned tasks, share details, update status, and add progress updates.",
         "Use tools when you need live data or to make changes. Prefer short WhatsApp-friendly replies.",
         "When referring to a task after a tool call, include its title; include the UUID only when needed for clarity.",
+        "Users may also use short forms from a recent numbered list (e.g. “1 done”, “2: note”); those are handled separately when possible.",
         "Relevant assigned tasks from semantic search (may be incomplete — use list_my_tasks if needed):",
         ragContext || "(none retrieved)",
     ].join("\n");
@@ -217,16 +381,29 @@ export async function handleIncomingWhatsAppMessage(params) {
         await sendWhatsAppToChatId(replyChatId, "Your WhatsApp number is not linked to an Office CRM profile. Ask an admin to set your phone on the Team page (local number without country code, e.g. 8921565767).");
         return;
     }
+    const phoneLocal = toLocalPhoneDigits(matchPhoneDigits) || toLocalPhoneDigits(profile.phone);
     console.log("[WhatsAppBot] profile matched", {
         profileId: profile.id,
         fullName: profile.full_name,
         profilePhoneRaw: profile.phone,
         profilePhoneLocal: toLocalPhoneDigits(profile.phone),
         matchPhoneDigits,
+        phoneLocal,
         webhookChatId: chatId,
         replyChatId,
         identitySource,
     });
+    const shortCommand = parseShortCommand(text);
+    if (shortCommand && phoneLocal) {
+        console.log("[WhatsAppBot] short command fast path", shortCommand);
+        await handleShortCommand({
+            command: shortCommand,
+            phoneLocal,
+            profileId: profile.id,
+            replyChatId,
+        });
+        return;
+    }
     let ragContext = "";
     try {
         const retrieved = await retrieveAssignedTasks(profile.id, text, 5);
@@ -255,14 +432,32 @@ export async function handleIncomingWhatsAppMessage(params) {
                 toolCalls: result.toolCalls,
                 providerModelParts: result.providerModelParts,
             });
+            const listOnly = result.toolCalls.length === 1 && result.toolCalls[0]?.name === "list_my_tasks";
+            let listFormatted = null;
             for (const call of result.toolCalls) {
-                const toolResult = await executeTool(call, profile.id);
+                const toolResult = await executeTool(call, profile.id, phoneLocal);
                 messages.push({
                     role: "tool",
                     name: call.name,
                     toolCallId: call.id,
                     content: toolResult,
                 });
+                if (call.name === "list_my_tasks") {
+                    try {
+                        const parsed = JSON.parse(toolResult);
+                        if (typeof parsed.formatted === "string") {
+                            listFormatted = parsed.formatted;
+                        }
+                    }
+                    catch {
+                        // ignore parse errors; LLM path continues
+                    }
+                }
+            }
+            // Deterministic list reply so numbers always match the saved session map.
+            if (listOnly && listFormatted) {
+                await sendWhatsAppToChatId(replyChatId, listFormatted);
+                return;
             }
             continue;
         }
