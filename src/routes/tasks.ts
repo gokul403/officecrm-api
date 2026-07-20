@@ -2,8 +2,69 @@ import { Router, Response } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/auth.js";
 import { notifyTaskAssignment, notifyTaskUpdate } from "../services/email.js";
+import { buildTaskAssignedMessage, sendWhatsAppMessage } from "../services/whatsapp.js";
+import { scheduleTaskEmbedding } from "../services/task-embeddings.js";
 
 const router = Router();
+
+async function notifyTaskAssignee(
+  assignedToId: string,
+  assignerId: string,
+  task: { title: string; priority?: string | null; due_date?: string | Date | null }
+): Promise<void> {
+  console.log("[WhatsApp] notifyTaskAssignee start", {
+    assignedToId,
+    assignerId,
+    taskTitle: task.title,
+  });
+
+  try {
+    const profileResult = await pool.query(
+      `SELECT assignee.phone, assignee.full_name AS assignee_name, assignee.email AS assignee_email,
+              assigner.full_name AS assigner_name
+       FROM profiles assignee
+       LEFT JOIN profiles assigner ON assigner.id = $2
+       WHERE assignee.id = $1`,
+      [assignedToId, assignerId]
+    );
+
+    if (profileResult.rows.length === 0) {
+      console.warn("[WhatsApp] Skipped (assignee profile not found)", { assignedToId });
+      return;
+    }
+
+    const {
+      phone,
+      assignee_name: assigneeName,
+      assignee_email: assigneeEmail,
+      assigner_name: assignerName,
+    } = profileResult.rows[0];
+
+    console.log("[WhatsApp] Assignee profile loaded", {
+      assignedToId,
+      assigneeName,
+      assigneeEmail,
+      hasPhone: Boolean(phone),
+      phone: phone ?? null,
+    });
+
+    if (!phone) {
+      console.log(`[WhatsApp] Skipped (no phone for assignee ${assignedToId})`);
+      return;
+    }
+
+    const message = buildTaskAssignedMessage(task, assignerName ?? "Someone");
+    console.log("[WhatsApp] Sending assignment message", {
+      assignedToId,
+      phone,
+      messagePreview: message.slice(0, 120),
+    });
+    await sendWhatsAppMessage(phone, message);
+    console.log("[WhatsApp] notifyTaskAssignee finished", { assignedToId });
+  } catch (error) {
+    console.error("[WhatsApp] notifyTaskAssignee error:", error);
+  }
+}
 
 // GET /api/tasks - List visible tasks
 router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -130,10 +191,23 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req: Aut
     await client.query("COMMIT");
 
     if (assignees.length > 0) {
+      console.log("[WhatsApp] Task created — notifying assignees", {
+        taskId: newTask.id,
+        assigneeIds: assignees.map((a) => a.id),
+      });
       notifyTaskAssignment(newTask, assignees).catch((err) => {
         console.error("[Email Trigger] Fail to send assignment emails:", err);
       });
+      for (const assignee of assignees) {
+        notifyTaskAssignee(assignee.id, createdBy, newTask).catch((err) => {
+          console.error("[WhatsApp] Fail to notify assignee on create:", err);
+        });
+      }
+    } else {
+      console.log("[WhatsApp] Task created — no assignees to notify", { taskId: newTask.id });
     }
+
+    scheduleTaskEmbedding(newTask.id);
 
     return res.status(201).json({
       ...newTask,
@@ -177,6 +251,14 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      const previousAssigneesResult = await client.query(
+        "SELECT profile_id FROM task_assignees WHERE task_id = $1",
+        [id]
+      );
+      const previousAssigneeIds = new Set(
+        previousAssigneesResult.rows.map((row: { profile_id: string }) => row.profile_id)
+      );
 
       const fields: string[] = [];
       const values: any[] = [];
@@ -243,6 +325,25 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
           console.error("[Email Trigger] Fail to send update emails:", err);
         });
       }
+
+      if (updates.assignee_ids !== undefined) {
+        const newlyAssigned = assigneesResult.rows.filter(
+          (assignee: { id: string }) => !previousAssigneeIds.has(assignee.id)
+        );
+        console.log("[WhatsApp] Task assignees updated", {
+          taskId: id,
+          previousCount: previousAssigneeIds.size,
+          currentIds: assigneesResult.rows.map((a: { id: string }) => a.id),
+          newlyAssignedIds: newlyAssigned.map((a: { id: string }) => a.id),
+        });
+        for (const assignee of newlyAssigned) {
+          notifyTaskAssignee(assignee.id, user.id, updatedTask).catch((err) => {
+            console.error("[WhatsApp] Fail to notify assignee on update:", err);
+          });
+        }
+      }
+
+      scheduleTaskEmbedding(id);
 
       return res.json({
         ...updatedTask,
@@ -350,6 +451,8 @@ router.post("/:taskId/comments", requireAuth, async (req: AuthenticatedRequest, 
       [taskId, user.id, content]
     );
 
+    scheduleTaskEmbedding(taskId);
+
     return res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error("Create comment error:", error);
@@ -375,6 +478,7 @@ router.delete("/comments/:id", requireAuth, async (req: AuthenticatedRequest, re
     }
 
     await pool.query("DELETE FROM task_comments WHERE id = $1", [id]);
+    scheduleTaskEmbedding(comment.task_id);
     return res.json({ message: "Comment deleted successfully" });
   } catch (error) {
     console.error("Delete comment error:", error);

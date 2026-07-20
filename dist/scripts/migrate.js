@@ -58,11 +58,15 @@ async function migrate() {
         full_name TEXT,
         avatar_url TEXT,
         job_title TEXT,
+        phone TEXT,
         manager_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
+    `);
+        await client.query(`
+      ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone TEXT
     `);
         // USER ROLES
         await client.query(`

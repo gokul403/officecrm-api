@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/auth.js";
 import { notifyLeadAssignment } from "../services/email.js";
+import { notifyAllUsersNewLead } from "../services/lead-notifications.js";
 
 const router = Router();
 
@@ -51,6 +52,10 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =
         });
       }
     }
+
+    notifyAllUsersNewLead(newLead, createdBy).catch((err) => {
+      console.error("[WhatsApp] Fail to broadcast new lead:", err);
+    });
 
     return res.status(201).json(newLead);
   } catch (error) {

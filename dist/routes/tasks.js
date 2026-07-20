@@ -2,7 +2,49 @@ import { Router } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { notifyTaskAssignment, notifyTaskUpdate } from "../services/email.js";
+import { buildTaskAssignedMessage, sendWhatsAppMessage } from "../services/whatsapp.js";
 const router = Router();
+async function notifyTaskAssignee(assignedToId, assignerId, task) {
+    console.log("[WhatsApp] notifyTaskAssignee start", {
+        assignedToId,
+        assignerId,
+        taskTitle: task.title,
+    });
+    try {
+        const profileResult = await pool.query(`SELECT assignee.phone, assignee.full_name AS assignee_name, assignee.email AS assignee_email,
+              assigner.full_name AS assigner_name
+       FROM profiles assignee
+       LEFT JOIN profiles assigner ON assigner.id = $2
+       WHERE assignee.id = $1`, [assignedToId, assignerId]);
+        if (profileResult.rows.length === 0) {
+            console.warn("[WhatsApp] Skipped (assignee profile not found)", { assignedToId });
+            return;
+        }
+        const { phone, assignee_name: assigneeName, assignee_email: assigneeEmail, assigner_name: assignerName, } = profileResult.rows[0];
+        console.log("[WhatsApp] Assignee profile loaded", {
+            assignedToId,
+            assigneeName,
+            assigneeEmail,
+            hasPhone: Boolean(phone),
+            phone: phone ?? null,
+        });
+        if (!phone) {
+            console.log(`[WhatsApp] Skipped (no phone for assignee ${assignedToId})`);
+            return;
+        }
+        const message = buildTaskAssignedMessage(task, assignerName ?? "Someone");
+        console.log("[WhatsApp] Sending assignment message", {
+            assignedToId,
+            phone,
+            messagePreview: message.slice(0, 120),
+        });
+        await sendWhatsAppMessage(phone, message);
+        console.log("[WhatsApp] notifyTaskAssignee finished", { assignedToId });
+    }
+    catch (error) {
+        console.error("[WhatsApp] notifyTaskAssignee error:", error);
+    }
+}
 // GET /api/tasks - List visible tasks
 router.get("/", requireAuth, async (req, res) => {
     try {
@@ -108,9 +150,21 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req, res
         }
         await client.query("COMMIT");
         if (assignees.length > 0) {
+            console.log("[WhatsApp] Task created — notifying assignees", {
+                taskId: newTask.id,
+                assigneeIds: assignees.map((a) => a.id),
+            });
             notifyTaskAssignment(newTask, assignees).catch((err) => {
                 console.error("[Email Trigger] Fail to send assignment emails:", err);
             });
+            for (const assignee of assignees) {
+                notifyTaskAssignee(assignee.id, createdBy, newTask).catch((err) => {
+                    console.error("[WhatsApp] Fail to notify assignee on create:", err);
+                });
+            }
+        }
+        else {
+            console.log("[WhatsApp] Task created — no assignees to notify", { taskId: newTask.id });
         }
         return res.status(201).json({
             ...newTask,
@@ -147,6 +201,8 @@ router.put("/:id", requireAuth, async (req, res) => {
         const client = await pool.connect();
         try {
             await client.query("BEGIN");
+            const previousAssigneesResult = await client.query("SELECT profile_id FROM task_assignees WHERE task_id = $1", [id]);
+            const previousAssigneeIds = new Set(previousAssigneesResult.rows.map((row) => row.profile_id));
             const fields = [];
             const values = [];
             let valIndex = 1;
@@ -197,6 +253,20 @@ router.put("/:id", requireAuth, async (req, res) => {
                 notifyTaskUpdate(updatedTask, assigneesResult.rows).catch((err) => {
                     console.error("[Email Trigger] Fail to send update emails:", err);
                 });
+            }
+            if (updates.assignee_ids !== undefined) {
+                const newlyAssigned = assigneesResult.rows.filter((assignee) => !previousAssigneeIds.has(assignee.id));
+                console.log("[WhatsApp] Task assignees updated", {
+                    taskId: id,
+                    previousCount: previousAssigneeIds.size,
+                    currentIds: assigneesResult.rows.map((a) => a.id),
+                    newlyAssignedIds: newlyAssigned.map((a) => a.id),
+                });
+                for (const assignee of newlyAssigned) {
+                    notifyTaskAssignee(assignee.id, user.id, updatedTask).catch((err) => {
+                        console.error("[WhatsApp] Fail to notify assignee on update:", err);
+                    });
+                }
             }
             return res.json({
                 ...updatedTask,

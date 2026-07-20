@@ -8,7 +8,7 @@ const router = Router();
 // GET /api/profiles
 router.get("/profiles", requireAuth, async (req, res) => {
     try {
-        const result = await pool.query("SELECT id, email, full_name, avatar_url, job_title, is_active FROM profiles ORDER BY full_name ASC");
+        const result = await pool.query("SELECT id, email, full_name, avatar_url, job_title, phone, is_active FROM profiles ORDER BY full_name ASC");
         return res.json(result.rows);
     }
     catch (error) {
@@ -19,7 +19,7 @@ router.get("/profiles", requireAuth, async (req, res) => {
 // GET /api/team — all authenticated users can view; mutations remain admin-only
 router.get("/team", requireAuth, async (req, res) => {
     try {
-        const profilesResult = await pool.query("SELECT id, email, full_name, avatar_url, job_title, is_active, manager_id FROM profiles ORDER BY email ASC");
+        const profilesResult = await pool.query("SELECT id, email, full_name, avatar_url, job_title, phone, is_active, manager_id FROM profiles ORDER BY email ASC");
         const rolesResult = await pool.query("SELECT user_id, role FROM user_roles");
         return res.json({ profiles: profilesResult.rows, roles: rolesResult.rows });
     }
@@ -31,9 +31,9 @@ router.get("/team", requireAuth, async (req, res) => {
 // POST /api/team/update-member/:id - Update profile fields (admin only)
 router.post("/team/update-member/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
     const { id } = req.params;
-    const { fullName, jobTitle } = req.body;
-    if (fullName === undefined && jobTitle === undefined) {
-        return res.status(400).json({ message: "Provide at least one of fullName or jobTitle" });
+    const { fullName, jobTitle, phone } = req.body;
+    if (fullName === undefined && jobTitle === undefined && phone === undefined) {
+        return res.status(400).json({ message: "Provide at least one of fullName, jobTitle, or phone" });
     }
     if (fullName !== undefined && String(fullName).trim().length === 0) {
         return res.status(400).json({ message: "fullName cannot be empty" });
@@ -49,8 +49,12 @@ router.post("/team/update-member/:id", requireAuth, requireRole(["admin"]), asyn
             values.push(jobTitle === "" ? null : String(jobTitle).trim());
             fields.push(`job_title = $${values.length}`);
         }
+        if (phone !== undefined) {
+            values.push(phone === "" ? null : String(phone).trim());
+            fields.push(`phone = $${values.length}`);
+        }
         values.push(id);
-        const query = `UPDATE profiles SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, email, full_name, job_title, is_active`;
+        const query = `UPDATE profiles SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, email, full_name, job_title, phone, is_active`;
         const result = await pool.query(query, values);
         if (result.rows.length === 0) {
             return res.status(404).json({ message: "Member not found" });
@@ -134,7 +138,7 @@ router.post("/team/password", requireAuth, requireRole(["admin"]), async (req, r
 });
 // POST /api/team/members
 router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, res) => {
-    const { email: rawEmail, fullName, jobTitle, role, managerId } = req.body;
+    const { email: rawEmail, fullName, jobTitle, phone, role, managerId } = req.body;
     if (!rawEmail || !fullName || !role)
         return res.status(400).json({ message: "email, fullName, and role are required" });
     const email = String(rawEmail).trim().toLowerCase();
@@ -167,7 +171,7 @@ router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, re
         const passwordHash = bcrypt.hashSync(temporaryPassword, 10);
         const userInsert = await client.query("INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id", [email, passwordHash]);
         const userId = userInsert.rows[0].id;
-        await client.query("INSERT INTO profiles (id, email, full_name, job_title, manager_id) VALUES ($1, $2, $3, $4, $5)", [userId, email, String(fullName).trim(), jobTitle?.trim() || null, resolvedManagerId]);
+        await client.query("INSERT INTO profiles (id, email, full_name, job_title, phone, manager_id) VALUES ($1, $2, $3, $4, $5, $6)", [userId, email, String(fullName).trim(), jobTitle?.trim() || null, phone?.trim() || null, resolvedManagerId]);
         await client.query("INSERT INTO user_roles (user_id, role) VALUES ($1, $2)", [userId, role]);
         await client.query("COMMIT");
         return res.status(201).json({
@@ -176,6 +180,7 @@ router.post("/team/members", requireAuth, requireRole(["admin"]), async (req, re
                 id: userId, email,
                 full_name: String(fullName).trim(),
                 job_title: jobTitle?.trim() || null,
+                phone: phone?.trim() || null,
                 role, manager_id: resolvedManagerId, is_active: true,
             },
             temporaryPassword,
