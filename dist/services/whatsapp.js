@@ -77,11 +77,26 @@ export function phonesMatchLocal(a, b) {
         return false;
     return left === right;
 }
-export function normalizePhoneToChatId(phone) {
-    const digits = normalizePhoneDigits(phone);
-    if (!digits)
+/**
+ * Digits for outbound WhatsApp JIDs. Profiles store 10-digit local numbers;
+ * WhatsApp expects India MSISDN with country code (91…).
+ */
+export function toWhatsAppMsisdnDigits(phone) {
+    const local = toLocalPhoneDigits(phone);
+    if (!local)
         return null;
-    return `${digits}@c.us`;
+    if (local.length === 10) {
+        return `91${local}`;
+    }
+    const raw = normalizePhoneDigits(phone);
+    return raw || null;
+}
+/** Build `…@c.us` for proactive sends (task/lead notify). Always uses country-coded MSISDN when local is 10 digits. */
+export function normalizePhoneToChatId(phone) {
+    const msisdn = toWhatsAppMsisdnDigits(phone);
+    if (!msisdn)
+        return null;
+    return `${msisdn}@c.us`;
 }
 /** Extract digits from a WhatsApp chatId like `91…@c.us` or `…@s.whatsapp.net` */
 export function chatIdToPhoneDigits(chatId) {
@@ -199,6 +214,9 @@ async function postSendText(chatId, message) {
     const url = `${WHATSAPP_API_URL}/api/sessions/${encodeURIComponent(WHATSAPP_SESSION_ID)}/messages/send-text`;
     const payload = { chatId, text: message };
     console.log("[WhatsApp] POST send-text", { url, chatId, textLength: message.length });
+    const controller = new AbortController();
+    const timeoutMs = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS ?? 25000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const startedAt = Date.now();
         const response = await fetch(url, {
@@ -208,6 +226,7 @@ async function postSendText(chatId, message) {
                 "X-API-Key": WHATSAPP_API_KEY,
             },
             body: JSON.stringify(payload),
+            signal: controller.signal,
         });
         const elapsedMs = Date.now() - startedAt;
         const body = await response.text().catch(() => "");
@@ -236,6 +255,9 @@ async function postSendText(chatId, message) {
             error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error,
         });
     }
+    finally {
+        clearTimeout(timer);
+    }
 }
 /** Send to an explicit WhatsApp JID (`…@c.us`, `…@lid`, etc.). */
 export async function sendWhatsAppToChatId(chatId, message) {
@@ -247,5 +269,9 @@ export async function sendWhatsAppMessage(phone, message) {
         console.warn("[WhatsApp] Skipped (invalid phone number)", { phone });
         return;
     }
+    console.log("[WhatsApp] Resolved outbound chatId", {
+        phoneRaw: phone,
+        chatId,
+    });
     await postSendText(chatId, message);
 }
