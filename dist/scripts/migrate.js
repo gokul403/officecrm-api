@@ -15,6 +15,8 @@ async function migrate() {
         // 1. Extensions
         await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
         await client.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
+        // Lean RAG: enable pgvector only — no HNSW/IVFFlat indexes (Aiven Free 1GB RAM/disk)
+        await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
         // 2. Enums
         await client.query(`
       DO $$ BEGIN
@@ -144,6 +146,15 @@ async function migrate() {
         user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
         content TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+        // TASK EMBEDDINGS (lean RAG — one row per task, no ANN indexes)
+        await client.query(`
+      CREATE TABLE IF NOT EXISTS task_embeddings (
+        task_id UUID PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        embedding vector(768) NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
         // LEADS

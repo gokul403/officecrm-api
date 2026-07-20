@@ -8,11 +8,16 @@ import customersRouter from "./routes/customers.js";
 import financeRouter from "./routes/finance.js";
 import teamRouter from "./routes/team.js";
 import projectsRouter from "./routes/projects.js";
+import { whatsappWebhookHandler } from "./routes/webhooks.js";
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
+// OpenWA webhook needs raw body for HMAC verification — mount before express.json()
+app.post("/api/webhooks/whatsapp", express.raw({ type: "application/json" }), (req, res) => {
+    void whatsappWebhookHandler(req, res);
+});
 app.use(express.json());
 // Request logger for development
 app.use((req, _res, next) => {

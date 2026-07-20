@@ -3,6 +3,7 @@ import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { notifyTaskAssignment, notifyTaskUpdate } from "../services/email.js";
 import { buildTaskAssignedMessage, sendWhatsAppMessage } from "../services/whatsapp.js";
+import { scheduleTaskEmbedding } from "../services/task-embeddings.js";
 const router = Router();
 async function notifyTaskAssignee(assignedToId, assignerId, task) {
     console.log("[WhatsApp] notifyTaskAssignee start", {
@@ -166,6 +167,7 @@ router.post("/", requireAuth, requireRole(["admin", "manager"]), async (req, res
         else {
             console.log("[WhatsApp] Task created — no assignees to notify", { taskId: newTask.id });
         }
+        scheduleTaskEmbedding(newTask.id);
         return res.status(201).json({
             ...newTask,
             assignees
@@ -268,6 +270,7 @@ router.put("/:id", requireAuth, async (req, res) => {
                     });
                 }
             }
+            scheduleTaskEmbedding(id);
             return res.json({
                 ...updatedTask,
                 assignees: assigneesResult.rows
@@ -352,6 +355,7 @@ router.post("/:taskId/comments", requireAuth, async (req, res) => {
         const result = await pool.query(`INSERT INTO task_comments (task_id, user_id, content)
        VALUES ($1, $2, $3)
        RETURNING *`, [taskId, user.id, content]);
+        scheduleTaskEmbedding(taskId);
         return res.status(201).json(result.rows[0]);
     }
     catch (error) {
@@ -373,6 +377,7 @@ router.delete("/comments/:id", requireAuth, async (req, res) => {
             return res.status(403).json({ message: "Forbidden: Cannot delete this comment" });
         }
         await pool.query("DELETE FROM task_comments WHERE id = $1", [id]);
+        scheduleTaskEmbedding(comment.task_id);
         return res.json({ message: "Comment deleted successfully" });
     }
     catch (error) {

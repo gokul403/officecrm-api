@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../config/db.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { notifyLeadAssignment } from "../services/email.js";
+import { notifyAllUsersNewLead } from "../services/lead-notifications.js";
 const router = Router();
 // GET /api/leads - List all leads (all authenticated roles)
 router.get("/", requireAuth, async (_req, res) => {
@@ -40,6 +41,9 @@ router.post("/", requireAuth, async (req, res) => {
                 });
             }
         }
+        notifyAllUsersNewLead(newLead, createdBy).catch((err) => {
+            console.error("[WhatsApp] Fail to broadcast new lead:", err);
+        });
         return res.status(201).json(newLead);
     }
     catch (error) {
