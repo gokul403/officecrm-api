@@ -183,6 +183,33 @@ export function resolveWhatsAppSenderIdentity(input) {
         source: fallbackDigits ? "phoneJid" : "none",
     };
 }
+const SEND_MIN_DELAY_MS = Number(process.env.WHATSAPP_SEND_MIN_DELAY_MS ?? 3000);
+const SEND_JITTER_MS = Number(process.env.WHATSAPP_SEND_JITTER_MS ?? 2000);
+const sendQueue = [];
+let queueRunning = false;
+function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
+async function drainSendQueue() {
+    if (queueRunning)
+        return;
+    queueRunning = true;
+    while (sendQueue.length > 0) {
+        const item = sendQueue.shift();
+        await postSendText(item.chatId, item.message);
+        item.resolve();
+        if (sendQueue.length > 0) {
+            await sleep(SEND_MIN_DELAY_MS + Math.random() * SEND_JITTER_MS);
+        }
+    }
+    queueRunning = false;
+}
+function enqueueSend(chatId, message) {
+    return new Promise((resolve) => {
+        sendQueue.push({ chatId, message, resolve });
+        void drainSendQueue();
+    });
+}
 async function postSendText(chatId, message) {
     console.log("[WhatsApp] sendToChatId called", {
         enabled: WHATSAPP_ENABLED,
@@ -261,7 +288,7 @@ async function postSendText(chatId, message) {
 }
 /** Send to an explicit WhatsApp JID (`…@c.us`, `…@lid`, etc.). */
 export async function sendWhatsAppToChatId(chatId, message) {
-    await postSendText(chatId, message);
+    await enqueueSend(chatId, message);
 }
 export async function sendWhatsAppMessage(phone, message) {
     const chatId = normalizePhoneToChatId(phone);
@@ -273,5 +300,5 @@ export async function sendWhatsAppMessage(phone, message) {
         phoneRaw: phone,
         chatId,
     });
-    await postSendText(chatId, message);
+    await enqueueSend(chatId, message);
 }
