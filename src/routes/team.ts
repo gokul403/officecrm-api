@@ -38,19 +38,45 @@ router.get("/team", requireAuth, async (req: AuthenticatedRequest, res: Response
 // POST /api/team/update-member/:id - Update profile fields (admin only)
 router.post("/team/update-member/:id", requireAuth, requireRole(["admin"]), async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { fullName, jobTitle, phone } = req.body;
+  const { email: rawEmail, fullName, jobTitle, phone } = req.body;
 
-  if (fullName === undefined && jobTitle === undefined && phone === undefined) {
-    return res.status(400).json({ message: "Provide at least one of fullName, jobTitle, or phone" });
+  if (rawEmail === undefined && fullName === undefined && jobTitle === undefined && phone === undefined) {
+    return res.status(400).json({ message: "Provide at least one of email, fullName, jobTitle, or phone" });
   }
 
   if (fullName !== undefined && String(fullName).trim().length === 0) {
     return res.status(400).json({ message: "fullName cannot be empty" });
   }
 
+  let formattedEmail: string | undefined = undefined;
+  if (rawEmail !== undefined) {
+    formattedEmail = String(rawEmail).trim().toLowerCase();
+    if (!EMAIL_RE.test(formattedEmail)) {
+      return res.status(400).json({ message: "Invalid email address" });
+    }
+  }
+
+  const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+
+    if (formattedEmail !== undefined) {
+      const existing = await client.query("SELECT id FROM users WHERE LOWER(email) = $1 AND id != $2", [formattedEmail, id]);
+      if (existing.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "A user with this email already exists" });
+      }
+
+      await client.query("UPDATE users SET email = $1 WHERE id = $2", [formattedEmail, id]);
+    }
+
     const fields: string[] = [];
     const values: unknown[] = [];
+
+    if (formattedEmail !== undefined) {
+      values.push(formattedEmail);
+      fields.push(`email = $${values.length}`);
+    }
 
     if (fullName !== undefined) {
       values.push(String(fullName).trim());
@@ -67,19 +93,26 @@ router.post("/team/update-member/:id", requireAuth, requireRole(["admin"]), asyn
       fields.push(`phone = $${values.length}`);
     }
 
-    values.push(id);
-    const query = `UPDATE profiles SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, email, full_name, job_title, phone, is_active`;
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Member not found" });
+    let updatedMember = null;
+    if (fields.length > 0) {
+      values.push(id);
+      const query = `UPDATE profiles SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING id, email, full_name, job_title, phone, is_active`;
+      const result = await client.query(query, values);
+      if (result.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Member not found" });
+      }
+      updatedMember = result.rows[0];
     }
 
-    return res.json({ ok: true, member: result.rows[0] });
+    await client.query("COMMIT");
+    return res.json({ ok: true, member: updatedMember });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Update member profile error:", error);
     return res.status(500).json({ message: "Error updating member profile" });
+  } finally {
+    client.release();
   }
 });
 
