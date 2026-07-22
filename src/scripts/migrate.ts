@@ -259,6 +259,31 @@ async function migrate() {
       )
     `);
 
+    // ISSUES
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS issues (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'backlog',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        image_url TEXT,
+        project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        assigned_to UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
+    await client.query(`
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS image_url TEXT
+    `);
+
+    await client.query(`
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL
+    `);
+
     // 4. Triggers
     console.log("Setting up updated_at trigger...");
     await client.query(`
@@ -271,7 +296,7 @@ async function migrate() {
       $$ LANGUAGE plpgsql;
     `);
 
-    const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses", "projects"];
+    const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses", "projects", "issues"];
     for (const table of tablesForTrigger) {
       await client.query(`DROP TRIGGER IF EXISTS trg_${table}_updated_at ON ${table}`);
       await client.query(`

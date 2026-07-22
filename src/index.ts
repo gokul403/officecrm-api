@@ -9,6 +9,7 @@ import customersRouter from "./routes/customers.js";
 import financeRouter from "./routes/finance.js";
 import teamRouter from "./routes/team.js";
 import projectsRouter from "./routes/projects.js";
+import issuesRouter from "./routes/issues.js";
 import { whatsappWebhookHandler } from "./routes/webhooks.js";
 
 dotenv.config();
@@ -43,6 +44,7 @@ app.use("/api/projects", projectsRouter);
 app.use("/api/leads", leadsRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/finance", financeRouter);
+app.use("/api/issues", issuesRouter);
 app.use("/api", teamRouter); // Mounts /profiles, /team, /team/role, etc.
 
 // Health Check
