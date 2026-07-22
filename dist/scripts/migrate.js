@@ -258,6 +258,29 @@ async function migrate() {
         await client.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL
     `);
+        await client.query(`
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS issue_number INT
+    `);
+        await client.query(`
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS issue_key TEXT
+    `);
+        // Backfill existing issues keys
+        await client.query(`
+      WITH numbered AS (
+        SELECT id, project_id,
+               ROW_NUMBER() OVER(PARTITION BY project_id ORDER BY created_at) as num
+        FROM issues
+      ),
+      project_codes AS (
+        SELECT id, project_code FROM projects
+      )
+      UPDATE issues i
+      SET issue_number = n.num,
+          issue_key = p.project_code || '-' || n.num
+      FROM numbered n
+      JOIN project_codes p ON n.project_id = p.id
+      WHERE i.id = n.id AND (i.issue_key IS NULL OR i.issue_number IS NULL)
+    `);
         // ISSUE COMMENTS
         await client.query(`
       CREATE TABLE IF NOT EXISTS issue_comments (

@@ -36,9 +36,16 @@ router.post("/", requireAuth, async (req, res) => {
     }
     try {
         const creatorId = req.user?.id;
+        // Get next issue number for this project
+        const numRes = await pool.query("SELECT COALESCE(MAX(issue_number), 0) + 1 AS next_num FROM issues WHERE project_id = $1", [project_id]);
+        const nextNum = numRes.rows[0].next_num;
+        // Get project code
+        const projRes = await pool.query("SELECT project_code FROM projects WHERE id = $1", [project_id]);
+        const projCode = projRes.rows[0]?.project_code || "ISS";
+        const issueKey = `${projCode}-${nextNum}`;
         const query = `
-      INSERT INTO issues (title, description, status, priority, assigned_to, created_by, project_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO issues (title, description, status, priority, assigned_to, created_by, project_id, issue_number, issue_key)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
         const result = await pool.query(query, [
@@ -49,6 +56,8 @@ router.post("/", requireAuth, async (req, res) => {
             assigned_to || null,
             creatorId || null,
             project_id,
+            nextNum,
+            issueKey,
         ]);
         const createdIssue = result.rows[0];
         // Save initial comment if provided
@@ -153,6 +162,9 @@ router.post("/:issueId/comments", requireAuth, async (req, res) => {
     const { issueId } = req.params;
     const { content } = req.body;
     const user = req.user;
+    if (!user || !user.id) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
     if (!content) {
         return res.status(400).json({ message: "Comment content is required" });
     }
@@ -176,6 +188,9 @@ router.post("/:issueId/comments", requireAuth, async (req, res) => {
 router.delete("/comments/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
     const user = req.user;
+    if (!user || !user.id) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
     try {
         const commentQuery = await pool.query("SELECT * FROM issue_comments WHERE id = $1", [id]);
         if (commentQuery.rows.length === 0) {
