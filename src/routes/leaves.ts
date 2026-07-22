@@ -61,7 +61,7 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =
     return res.status(400).json({ message: "Start date, end date, and leave type are required" });
   }
 
-  const validTypes = ['annual', 'sick', 'unpaid', 'other'];
+  const validTypes = ['annual', 'sick', 'unpaid', 'wfh', 'other'];
   if (!validTypes.includes(leave_type)) {
     return res.status(400).json({ message: "Invalid leave type" });
   }

@@ -328,7 +328,7 @@ async function migrate() {
         profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
         start_date DATE NOT NULL,
         end_date DATE NOT NULL,
-        leave_type TEXT NOT NULL CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'other')),
+        leave_type TEXT NOT NULL CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'wfh', 'other')),
         reason TEXT,
         status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
         actioned_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
@@ -336,6 +336,12 @@ async function migrate() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
+    `);
+
+    // Alter leaves constraint if it exists to allow wfh
+    await client.query(`
+      ALTER TABLE leaves DROP CONSTRAINT IF EXISTS leaves_leave_type_check;
+      ALTER TABLE leaves ADD CONSTRAINT leaves_leave_type_check CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'wfh', 'other'));
     `);
 
     // 4. Triggers
