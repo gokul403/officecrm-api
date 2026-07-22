@@ -284,6 +284,17 @@ async function migrate() {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL
     `);
 
+    // ISSUE COMMENTS
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS issue_comments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        issue_id UUID NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
     // 4. Triggers
     console.log("Setting up updated_at trigger...");
     await client.query(`

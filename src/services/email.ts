@@ -195,3 +195,45 @@ export async function notifyLeadAssignment(
 
   await sendTransactionalEmail([{ name: assignee.full_name || undefined, email: assignee.email }], subject, htmlContent);
 }
+
+// Helper: Issue Assigned Email Template
+export async function notifyIssueAssignment(
+  issue: { title: string; description?: string | null; priority: string; status: string },
+  assignee: { full_name?: string | null; email: string }
+) {
+  const subject = `[New Issue Assigned] Issue: ${issue.title}`;
+  const htmlContent = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%); padding: 20px; border-radius: 8px 8px 0 0; text-align: center; color: white;">
+        <h1 style="margin: 0; font-size: 22px;">New Issue Assigned</h1>
+        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">OfficeFlow Workspace Issue Tracking</p>
+      </div>
+      <div style="padding: 20px; background-color: white; border-radius: 0 0 8px 8px;">
+        <h2 style="margin-top: 0; color: #1e293b; font-size: 18px;">${issue.title}</h2>
+        <p style="color: #64748b; font-size: 14px; line-height: 1.5;">${issue.description || "No description provided."}</p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569; width: 120px;">Status:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b; text-transform: capitalize;">${issue.status.replace("_", " ")}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">Priority:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b; text-transform: capitalize;">${issue.priority}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 30px; text-align: center;">
+          <a href="https://pulse-office-crm.vercel.app/issues" style="background-color: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(124, 58, 237, 0.2);">
+            View Workspace Issues
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 20px; font-size: 11px; color: #94a3b8;">
+        This is an automated notification from your OfficeFlow workspace.
+      </div>
+    </div>
+  `;
+
+  await sendTransactionalEmail([{ name: assignee.full_name || undefined, email: assignee.email }], subject, htmlContent);
+}
