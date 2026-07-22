@@ -206,3 +206,92 @@ export async function notifyIssueAssignment(issue, assignee) {
   `;
     await sendTransactionalEmail([{ name: assignee.full_name || undefined, email: assignee.email }], subject, htmlContent);
 }
+export async function notifyLeaveApplication(leave, employee, managers) {
+    const subject = `[Leave Request Submitted] ${employee.full_name || employee.email} has applied for leave`;
+    const htmlContent = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 20px; border-radius: 8px 8px 0 0; text-align: center; color: white;">
+        <h1 style="margin: 0; font-size: 22px;">New Leave Application</h1>
+        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">OfficeFlow Leave Management</p>
+      </div>
+      <div style="padding: 20px; background-color: white; border-radius: 0 0 8px 8px;">
+        <p style="color: #1e293b; font-size: 15px;">A new leave application has been submitted by <strong>${employee.full_name || employee.email}</strong> and requires your review.</p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569; width: 120px;">Leave Type:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b; text-transform: capitalize;">${leave.leave_type}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">Start Date:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b;">${leave.start_date}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">End Date:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b;">${leave.end_date}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">Reason:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b;">${leave.reason || "No reason provided."}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 30px; text-align: center;">
+          <a href="https://pulse-office-crm.vercel.app/leaves/approvals" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2);">
+            Review Approvals Dashboard
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 20px; font-size: 11px; color: #94a3b8;">
+        This is an automated notification from your OfficeFlow workspace.
+      </div>
+    </div>
+  `;
+    await sendTransactionalEmail(managers.map(m => ({ name: m.full_name || undefined, email: m.email })), subject, htmlContent);
+}
+export async function notifyLeaveStatusChange(leave, employee, reviewer) {
+    const isApproved = leave.status === "approved";
+    const subject = `[Leave Request ${isApproved ? "Approved" : "Rejected"}] Your leave request status has been updated`;
+    const bannerColor = isApproved ? "linear-gradient(135deg, #10b981 0%, #047857 100%)" : "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
+    const htmlContent = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+      <div style="background: ${bannerColor}; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; color: white;">
+        <h1 style="margin: 0; font-size: 22px;">Leave Request ${isApproved ? "Approved" : "Rejected"}</h1>
+        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">OfficeFlow Leave Management</p>
+      </div>
+      <div style="padding: 20px; background-color: white; border-radius: 0 0 8px 8px;">
+        <p style="color: #1e293b; font-size: 15px;">Hello ${employee.full_name || "there"},</p>
+        <p style="color: #1e293b; font-size: 15px;">Your leave request has been reviewed and <strong>${leave.status}</strong> by ${reviewer.full_name || "your manager"}.</p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569; width: 120px;">Leave Type:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b; text-transform: capitalize;">${leave.leave_type}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">Start Date:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b;">${leave.start_date}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">End Date:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b;">${leave.end_date}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #475569;">Status:</td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: ${isApproved ? "#10b981" : "#ef4444"}; font-weight: 600; text-transform: capitalize;">${leave.status}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 30px; text-align: center;">
+          <a href="https://pulse-office-crm.vercel.app/leaves" style="background-color: ${isApproved ? "#10b981" : "#ef4444"}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; display: inline-block;">
+            View My Leaves
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 20px; font-size: 11px; color: #94a3b8;">
+        This is an automated notification from your OfficeFlow workspace.
+      </div>
+    </div>
+  `;
+    await sendTransactionalEmail([{ name: employee.full_name || undefined, email: employee.email }], subject, htmlContent);
+}

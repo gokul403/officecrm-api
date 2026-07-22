@@ -291,6 +291,22 @@ async function migrate() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+        // LEAVES MANAGEMENT
+        await client.query(`
+      CREATE TABLE IF NOT EXISTS leaves (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
+        leave_type TEXT NOT NULL CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'other')),
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        actioned_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+        actioned_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
         // 4. Triggers
         console.log("Setting up updated_at trigger...");
         await client.query(`
@@ -302,7 +318,7 @@ async function migrate() {
       END;
       $$ LANGUAGE plpgsql;
     `);
-        const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses", "projects", "issues"];
+        const tablesForTrigger = ["users", "profiles", "tasks", "leads", "customers", "income", "expenses", "projects", "issues", "leaves"];
         for (const table of tablesForTrigger) {
             await client.query(`DROP TRIGGER IF EXISTS trg_${table}_updated_at ON ${table}`);
             await client.query(`
