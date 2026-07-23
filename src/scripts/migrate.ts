@@ -344,6 +344,12 @@ async function migrate() {
       ALTER TABLE leaves ADD CONSTRAINT leaves_leave_type_check CHECK (leave_type IN ('annual', 'sick', 'unpaid', 'wfh', 'other'));
     `);
 
+    // Add half-day fields to leaves table
+    await client.query(`
+      ALTER TABLE leaves ADD COLUMN IF NOT EXISTS is_half_day BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE leaves ADD COLUMN IF NOT EXISTS half_day_portion TEXT CHECK (half_day_portion IN ('first_half', 'second_half'));
+    `);
+
     // 4. Triggers
     console.log("Setting up updated_at trigger...");
     await client.query(`

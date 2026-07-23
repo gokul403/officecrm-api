@@ -50,7 +50,7 @@ router.post("/", requireAuth, async (req, res) => {
     if (!user || !user.id) {
         return res.status(401).json({ message: "Unauthorized" });
     }
-    const { start_date, end_date, leave_type, reason } = req.body;
+    const { start_date, end_date, leave_type, reason, is_half_day, half_day_portion } = req.body;
     if (!start_date || !end_date || !leave_type) {
         return res.status(400).json({ message: "Start date, end date, and leave type are required" });
     }
@@ -58,13 +58,34 @@ router.post("/", requireAuth, async (req, res) => {
     if (!validTypes.includes(leave_type)) {
         return res.status(400).json({ message: "Invalid leave type" });
     }
+    // Get server local date string (YYYY-MM-DD) for validation
+    const todayObj = new Date();
+    const year = todayObj.getFullYear();
+    const month = String(todayObj.getMonth() + 1).padStart(2, '0');
+    const day = String(todayObj.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+    if (start_date < todayStr) {
+        return res.status(400).json({ message: "Start date must be today or a future date" });
+    }
+    if (end_date < todayStr) {
+        return res.status(400).json({ message: "End date must be today or a future date" });
+    }
     if (new Date(end_date) < new Date(start_date)) {
         return res.status(400).json({ message: "End date cannot be before start date" });
     }
+    // Half day validation
+    if (is_half_day) {
+        if (start_date !== end_date) {
+            return res.status(400).json({ message: "Start date and end date must be the same for a half day leave" });
+        }
+        if (!half_day_portion || !['first_half', 'second_half'].includes(half_day_portion)) {
+            return res.status(400).json({ message: "Valid half day portion ('first_half' or 'second_half') is required" });
+        }
+    }
     try {
         const query = `
-      INSERT INTO leaves (profile_id, start_date, end_date, leave_type, reason, status)
-      VALUES ($1, $2, $3, $4, $5, 'pending')
+      INSERT INTO leaves (profile_id, start_date, end_date, leave_type, reason, status, is_half_day, half_day_portion)
+      VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
       RETURNING *
     `;
         const result = await pool.query(query, [
@@ -72,7 +93,9 @@ router.post("/", requireAuth, async (req, res) => {
             start_date,
             end_date,
             leave_type,
-            reason || null
+            reason || null,
+            !!is_half_day,
+            is_half_day ? half_day_portion : null
         ]);
         const createdLeave = result.rows[0];
         // Trigger leave application email notifications
